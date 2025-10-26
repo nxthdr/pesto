@@ -13,10 +13,31 @@ This setup provides an environment for integration testing of Pesto's sFlow coll
 
 1. The sFlow producer reads test sFlow datagrams from `.bin` files in the `tests/` directory
 2. The producer sends these datagrams via UDP to Pesto (`10.0.0.99:6343`)
-3. Pesto parses the sFlow datagrams and serializes them to Cap'n Proto format
-4. Pesto produces the serialized records to the `pesto-sflow` topic in Redpanda
-5. ClickHouse uses a table based on the [Kafka engine](https://clickhouse.com/docs/en/engines/table-engines/integrations/kafka) (`sflow.from_kafka`) to read messages from the Redpanda topic
-6. The consumed data is inserted into a storage table (`sflow.records`) for analysis and verification
+3. Pesto parses the sFlow datagrams using the `sflow-parser` library
+4. **Pesto sends one Kafka message per flow record** (flattened structure)
+5. Each message contains: datagram metadata, sample metadata, and flow data (IPs, ports, protocol)
+6. IPv4 addresses are converted to IPv6-mapped format for uniform handling
+7. ClickHouse consumes messages using the Kafka engine table (`sflow.from_kafka`)
+8. A materialized view (`sflow.from_kafka_mv`) extracts and stores flow data in `sflow.flows`
+9. The `sflow.flows` table contains complete flow information matching the infrastructure flows schema
+
+## Cap'n Proto Schema
+
+The sFlow records are serialized using a **flattened Cap'n Proto structure** (`SFlowFlowRecord`):
+
+**Design principle**: One message per flow record instead of nested arrays
+
+**Message structure**:
+- **Datagram metadata**: timestamp, agent address/port, sequence numbers, uptime
+- **Sample metadata**: source ID, sampling rate, sample pool, drops, interfaces
+- **Flow data**: IPv6 addresses (IPv4-mapped), ports, protocol, packet length
+
+**Key features**:
+- All IP addresses stored as IPv6 (IPv4 converted to IPv6-mapped format)
+- No nested unions or arrays - completely flat structure
+- Easy to consume by ClickHouse without complex SQL
+
+The schema is located in `../schemas/sflow.capnp` and is mounted into ClickHouse at `/var/lib/clickhouse/format_schemas/`.
 
 ## Test Data
 
@@ -57,29 +78,34 @@ docker exec -ti integration-redpanda-1 rpk topic list
 
 ### Check ClickHouse tables
 
-View all records:
+View all flows:
 ```sh
-docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT * FROM sflow.records FORMAT Pretty"
+docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT * FROM sflow.flows FORMAT Pretty"
 ```
 
-Count records by sample type:
+Count total flows:
 ```sh
-docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT sample_type, count() FROM sflow.records GROUP BY sample_type"
+docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT count() FROM sflow.flows"
 ```
 
-View flow samples:
+View flows with computed traffic (multiply by sampling rate):
 ```sh
-docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT time_received, agent_addr, sample_type, sampling_rate, source_id FROM sflow.records WHERE sample_type LIKE '%Flow%' FORMAT Pretty"
+docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT time_received_ns, IPv6NumToString(src_addr) as src, IPv6NumToString(dst_addr) as dst, src_port, dst_port, protocol, bytes, packets, sampling_rate, bytes * sampling_rate as total_bytes FROM sflow.flows LIMIT 10 FORMAT Vertical"
 ```
 
-View counter samples:
+Aggregate traffic by time:
 ```sh
-docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT time_received, agent_addr, sample_type, source_id FROM sflow.records WHERE sample_type LIKE '%Counter%' FORMAT Pretty"
+docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT toStartOfMinute(time_received_ns) as time, sum(bytes * max2(sampling_rate, 1)) as total_bytes FROM sflow.flows GROUP BY time ORDER BY time FORMAT Pretty"
 ```
 
-View records with details:
+Check Kafka consumer status:
 ```sh
-docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT time_received, agent_addr, sample_type, sampling_rate, sample_pool, drops, input_interface, output_interface FROM sflow.records FORMAT Vertical"
+docker exec -ti integration-clickhouse-1 clickhouse-client --query "SELECT database, table, num_messages_read, last_commit_time FROM system.kafka_consumers FORMAT Vertical"
+```
+
+Show table schema:
+```sh
+docker exec -ti integration-clickhouse-1 clickhouse-client --query "DESCRIBE sflow.flows"
 ```
 
 ### Send additional test data
