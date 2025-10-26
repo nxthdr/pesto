@@ -1,0 +1,56 @@
+services:
+  # sFlow producer - sends test sFlow datagrams
+  sflow-producer:
+    build: ./sflow-producer
+    command: --file /data/sflow.bin --target 10.0.0.99:6343 --count 10 --interval 500
+    volumes:
+      - ./tests:/data:ro
+    networks:
+      integration:
+        ipv4_address: 10.0.0.50
+    depends_on:
+      - pesto
+
+  # Pesto - sFlow collector under test
+  pesto:
+    build: ..
+    command: -vv --sflow-address=0.0.0.0:6343 --kafka-brokers=10.0.0.100:9092 --kafka-topic=pesto-sflow
+    ports:
+      - "6343:6343/udp"
+      - "8080:8080"
+    networks:
+      integration:
+        ipv4_address: 10.0.0.99
+    depends_on:
+      - redpanda
+
+  # Redpanda - Kafka broker
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command: redpanda start --check=false --overprovisioned --smp 1 --memory 500M
+    volumes:
+      - ./config/redpanda/redpanda.yml:/etc/redpanda/redpanda.yaml:ro
+    networks:
+      integration:
+        ipv4_address: 10.0.0.100
+
+  # ClickHouse - Data storage and verification
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    volumes:
+      - ./config/clickhouse/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+      - ../schemas:/var/lib/clickhouse/format_schemas
+    networks:
+      integration:
+        ipv4_address: 10.0.0.200
+    depends_on:
+      - redpanda
+
+networks:
+  integration:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 10.0.0.0/24
+          gateway: 10.0.0.1
