@@ -29,7 +29,16 @@ pub fn serialize_sflow_record(
 
     for sample in &datagram.samples {
         // Only process flow samples
-        let (sample_seq, source_id, sampling_rate, sample_pool, drops, input_if, output_if, flow_records) = match &sample.sample_data {
+        let (
+            sample_seq,
+            source_id,
+            sampling_rate,
+            sample_pool,
+            drops,
+            input_if,
+            output_if,
+            flow_records,
+        ) = match &sample.sample_data {
             SampleData::FlowSample(flow) => (
                 flow.sequence_number,
                 flow.source_id.0,
@@ -58,7 +67,7 @@ pub fn serialize_sflow_record(
             let mut message = Builder::new_default();
             {
                 let mut record = message.init_root::<s_flow_flow_record::Builder>();
-                
+
                 // Set datagram metadata
                 record.set_time_received_ns(time_received_ns as u64);
                 record.set_agent_addr(&serialize_address(&datagram.agent_address));
@@ -66,7 +75,7 @@ pub fn serialize_sflow_record(
                 record.set_agent_sub_id(datagram.sub_agent_id);
                 record.set_datagram_sequence_number(datagram.sequence_number);
                 record.set_uptime(datagram.uptime);
-                
+
                 // Set sample metadata
                 record.set_sample_sequence_number(sample_seq);
                 record.set_source_id(source_id);
@@ -75,7 +84,7 @@ pub fn serialize_sflow_record(
                 record.set_drops(drops);
                 record.set_input_interface(input_if);
                 record.set_output_interface(output_if);
-                
+
                 // Set flow record data based on type
                 // Always use IPv6 format (map IPv4 to IPv6)
                 match &flow_record.flow_data {

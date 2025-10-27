@@ -31,8 +31,9 @@ pub async fn handle(socket: UdpSocket, tx: Sender<(SFlowDatagram, i64, SocketAdd
                 match parse_datagram(&data) {
                     Ok(datagram) => {
                         counter!("pesto_sflow_datagrams_total", "status" => "success").increment(1);
-                        counter!("pesto_sflow_samples_total").increment(datagram.samples.len() as u64);
-                        
+                        counter!("pesto_sflow_samples_total")
+                            .increment(datagram.samples.len() as u64);
+
                         trace!(
                             "Parsed sFlow datagram: version={:?}, agent={:?}, samples={}",
                             datagram.version,
@@ -46,8 +47,9 @@ pub async fn handle(socket: UdpSocket, tx: Sender<(SFlowDatagram, i64, SocketAdd
                         }
                     }
                     Err(e) => {
-                        counter!("pesto_sflow_datagrams_total", "status" => "parse_error").increment(1);
-                        
+                        counter!("pesto_sflow_datagrams_total", "status" => "parse_error")
+                            .increment(1);
+
                         // Try to extract version from first 4 bytes to help diagnose
                         let version_hint = if n_bytes >= 4 {
                             let version_bytes = [buf[0], buf[1], buf[2], buf[3]];
@@ -56,7 +58,7 @@ pub async fn handle(socket: UdpSocket, tx: Sender<(SFlowDatagram, i64, SocketAdd
                         } else {
                             String::from(" (too short for version)")
                         };
-                        
+
                         error!(
                             "Failed to parse sFlow datagram from {} (size: {} bytes{}): {:?}",
                             peer_addr, n_bytes, version_hint, e
