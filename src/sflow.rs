@@ -47,8 +47,25 @@ pub async fn handle(socket: UdpSocket, tx: Sender<(SFlowDatagram, i64, SocketAdd
                     }
                     Err(e) => {
                         counter!("pesto_sflow_datagrams_total", "status" => "parse_error").increment(1);
-                        error!("Failed to parse sFlow datagram from {}: {:?}", peer_addr, e);
-                        trace!("Failed datagram data: {:02x?}", &buf[..n_bytes]);
+                        
+                        // Try to extract version from first 4 bytes to help diagnose
+                        let version_hint = if n_bytes >= 4 {
+                            let version_bytes = [buf[0], buf[1], buf[2], buf[3]];
+                            let version = u32::from_be_bytes(version_bytes);
+                            format!(" (version field: {})", version)
+                        } else {
+                            String::from(" (too short for version)")
+                        };
+                        
+                        error!(
+                            "Failed to parse sFlow datagram from {} (size: {} bytes{}): {:?}",
+                            peer_addr, n_bytes, version_hint, e
+                        );
+                        debug!(
+                            "Failed datagram header (first 32 bytes): {:02x?}",
+                            &buf[..n_bytes.min(32)]
+                        );
+                        trace!("Failed datagram full data: {:02x?}", &buf[..n_bytes]);
                     }
                 }
             }
