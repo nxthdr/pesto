@@ -21,7 +21,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/pesto /app/pesto
 
-EXPOSE 4000
+EXPOSE 6343
 EXPOSE 8080
 
 ENTRYPOINT [ "/app/pesto" ]

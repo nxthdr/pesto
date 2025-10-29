@@ -1,8 +1,7 @@
 -- Create database for sFlow data
 CREATE DATABASE IF NOT EXISTS sflow;
 
--- Create Kafka consumer table for flattened sFlow flow records
--- One message per flow record
+-- Create Kafka consumer table for flat sFlow flow records
 CREATE TABLE IF NOT EXISTS sflow.from_kafka
 (
     timeReceivedNs UInt64,
@@ -18,14 +17,14 @@ CREATE TABLE IF NOT EXISTS sflow.from_kafka
     drops UInt32,
     inputInterface UInt32,
     outputInterface UInt32,
-
-    -- Flow record fields (IPv6 only - IPv4 is mapped to IPv6 in serializer)
-    `sampledIpv6.length` UInt32,
-    `sampledIpv6.protocol` UInt32,
-    `sampledIpv6.srcIp` FixedString(16),
-    `sampledIpv6.dstIp` FixedString(16),
-    `sampledIpv6.srcPort` UInt32,
-    `sampledIpv6.dstPort` UInt32
+    length UInt32,
+    protocol UInt32,
+    srcIp FixedString(16),
+    dstIp FixedString(16),
+    srcPort UInt32,
+    dstPort UInt32,
+    tcpFlags UInt32,
+    tos UInt32
 )
 ENGINE = Kafka()
 SETTINGS
@@ -81,19 +80,19 @@ AS SELECT
     toIPv6(agentAddr) AS sampler_address,
     agentPort AS sampler_port,
 
-    -- Extract IPs
-    toIPv6(`sampledIpv6.srcIp`) AS src_addr,
-    toIPv6(`sampledIpv6.dstIp`) AS dst_addr,
+    -- Extract IPs (already IPv6 format)
+    toIPv6(srcIp) AS src_addr,
+    toIPv6(dstIp) AS dst_addr,
 
     -- Extract ports and protocol
-    `sampledIpv6.srcPort` AS src_port,
-    `sampledIpv6.dstPort` AS dst_port,
-    `sampledIpv6.protocol` AS protocol,
+    srcPort AS src_port,
+    dstPort AS dst_port,
+    protocol AS protocol,
     0 AS etype,
 
     -- Raw packet data
-    `sampledIpv6.length` AS packet_length,
-    toUInt64(`sampledIpv6.length`) AS bytes,
+    length AS packet_length,
+    toUInt64(length) AS bytes,
     1 AS packets
 FROM sflow.from_kafka
 WHERE samplingRate > 0;

@@ -131,6 +131,10 @@ fn set_metrics(metrics_address: SocketAddr) {
         "Total number of sFlow samples processed"
     );
     metrics::describe_counter!(
+        "pesto_sflow_samples_received_total",
+        "Total number of sFlow samples received by type (flow or counter)"
+    );
+    metrics::describe_counter!(
         "pesto_sflow_records_total",
         "Total number of sFlow records transmitted"
     );

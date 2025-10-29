@@ -65,7 +65,11 @@ pub async fn handle(
     let mut client_config = ClientConfig::new();
     client_config
         .set("bootstrap.servers", kafka_brokers)
-        .set("message.timeout.ms", config.message_timeout_ms.to_string());
+        .set("message.timeout.ms", config.message_timeout_ms.to_string())
+        .set("socket.timeout.ms", "10000")
+        .set("socket.connection.setup.timeout.ms", "10000")
+        .set("request.timeout.ms", "10000")
+        .set("debug", "broker,security");
 
     if let KafkaAuth::SaslPlainText(auth) = kafka_auth {
         client_config = client_config
@@ -94,23 +98,48 @@ pub async fn handle(
         }
 
         loop {
-            if std::time::Instant::now().duration_since(start_time)
-                > std::time::Duration::from_millis(config.batch_wait_time)
-            {
+            let remaining_time = config.batch_wait_time.saturating_sub(
+                std::time::Instant::now()
+                    .duration_since(start_time)
+                    .as_millis() as u64,
+            );
+
+            if remaining_time == 0 {
                 break;
             }
 
-            let datagram = rx.try_recv();
-            if datagram.is_err() {
-                tokio::time::sleep(Duration::from_millis(config.batch_wait_interval)).await;
-                continue;
-            }
+            let datagram = tokio::time::timeout(
+                Duration::from_millis(remaining_time.min(config.batch_wait_interval)),
+                rx.recv(),
+            )
+            .await;
 
-            let (datagram, time_received_ns, peer_addr) = datagram.unwrap();
-            trace!("Processing datagram from {}", peer_addr);
+            let datagram = match datagram {
+                Ok(Some(d)) => {
+                    trace!("Received datagram from channel");
+                    d
+                }
+                Ok(None) => {
+                    error!("sFlow channel closed");
+                    return Ok(());
+                }
+                Err(_) => {
+                    // Timeout, check if we should break
+                    trace!("Channel recv timeout, continuing batch collection");
+                    continue;
+                }
+            };
 
-            // Serialize the sFlow records
+            let (datagram, time_received_ns, peer_addr) = datagram;
+            trace!(
+                "Processing datagram from {} with {} samples",
+                peer_addr,
+                datagram.samples.len()
+            );
+
+            // Serialize the sFlow records (only flow samples)
             let messages = serialize_sflow_record(&datagram, time_received_ns, peer_addr);
+            trace!("Serialized {} messages from datagram", messages.len());
 
             for message in messages {
                 // Max message size check
@@ -125,17 +154,22 @@ pub async fn handle(
         }
 
         if final_message.is_empty() {
+            trace!("Batch timeout reached but no messages collected, continuing");
             continue;
         }
 
-        debug!("sending {} sFlow records to Kafka", n_records);
+        debug!(
+            "sending {} sFlow records to Kafka (message size: {} bytes)",
+            n_records,
+            final_message.len()
+        );
         let delivery_status = producer
             .send(
                 FutureRecord::to(config.topic.as_str())
                     .payload(&final_message)
                     .key("")
                     .headers(OwnedHeaders::new()),
-                Duration::from_secs(0),
+                Duration::from_secs(10),
             )
             .await;
 

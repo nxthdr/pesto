@@ -42,8 +42,14 @@ pub async fn handle(socket: UdpSocket, tx: Sender<(SFlowDatagram, i64, SocketAdd
                         );
 
                         // Send to producer
-                        if let Err(e) = tx.send((datagram, time_received_ns, peer_addr)).await {
-                            error!("Failed to send datagram to producer: {}", e);
+                        trace!("Sending datagram to producer channel");
+                        match tx.send((datagram, time_received_ns, peer_addr)).await {
+                            Ok(_) => {
+                                trace!("Successfully sent datagram to producer");
+                            }
+                            Err(e) => {
+                                error!("Failed to send datagram to producer: {}", e);
+                            }
                         }
                     }
                     Err(e) => {
