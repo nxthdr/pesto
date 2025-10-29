@@ -22,7 +22,7 @@ capnp = "0.23"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clap-verbosity-flag = { version = "3.0", features = ["tracing"] }
-etherparse = "0.16"
+etherparse = "0.19"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.17"
 rdkafka = { version = "0.38", features = ["ssl", "sasl"] }
