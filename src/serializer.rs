@@ -1,5 +1,6 @@
 use capnp::message::Builder;
 use capnp::serialize;
+use etherparse::SlicedPacket;
 use metrics::counter;
 use sflow_parser::models::{Address, FlowData, FlowRecord};
 use sflow_parser::{SFlowDatagram, SampleData};
@@ -22,149 +23,72 @@ pub fn serialize_address(addr: &Address) -> Vec<u8> {
     }
 }
 
-// Parse raw packet header to extract IP information
+// Parse raw packet header to extract IP information using etherparse
 // Returns (length, protocol, src_ip, dst_ip, src_port, dst_port, tcp_flags, tos/priority)
 fn parse_raw_packet_header(
     header: &[u8],
 ) -> Option<(u32, u32, Ipv6Addr, Ipv6Addr, u32, u32, u32, u32)> {
-    if header.len() < 14 {
-        return None; // Too short for Ethernet header
-    }
+    // Use etherparse to safely parse the packet
+    let packet = SlicedPacket::from_ethernet(header).ok()?;
 
-    // Skip Ethernet header (14 bytes: 6 dst MAC + 6 src MAC + 2 EtherType)
-    let ether_type = u16::from_be_bytes([header[12], header[13]]);
-    let ip_start = 14;
-
-    match ether_type {
-        0x0800 => {
-            // IPv4
-            if header.len() < ip_start + 20 {
-                return None; // Too short for IPv4 header
-            }
-
-            let ip_header = &header[ip_start..];
-            let version_ihl = ip_header[0];
-            let ihl = (version_ihl & 0x0F) as usize * 4; // Header length in bytes
-
-            if ihl < 20 || header.len() < ip_start + ihl {
-                return None;
-            }
-
-            let total_length = u16::from_be_bytes([ip_header[2], ip_header[3]]) as u32;
-            let protocol = ip_header[9] as u32;
-            let tos = ip_header[1] as u32;
-
-            let src_ip = Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]);
-            let dst_ip = Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]);
-
-            // Parse TCP/UDP ports if available
-            let (src_port, dst_port, tcp_flags) = if header.len() >= ip_start + ihl + 4 {
-                let transport_header = &header[ip_start + ihl..];
-                let src = u16::from_be_bytes([transport_header[0], transport_header[1]]) as u32;
-                let dst = u16::from_be_bytes([transport_header[2], transport_header[3]]) as u32;
-
-                // Get TCP flags if it's TCP
-                let flags = if protocol == 6 && header.len() >= ip_start + ihl + 14 {
-                    transport_header[13] as u32
-                } else {
-                    0
-                };
-
-                (src, dst, flags)
-            } else {
-                (0, 0, 0)
-            };
-
-            Some((
-                total_length,
-                protocol,
-                src_ip.to_ipv6_mapped(),
-                dst_ip.to_ipv6_mapped(),
-                src_port,
-                dst_port,
-                tcp_flags,
-                tos,
-            ))
+    // Extract IP information
+    let (length, protocol, src_ip, dst_ip, tos) = match packet.net {
+        Some(etherparse::NetSlice::Ipv4(ipv4)) => {
+            let hdr = ipv4.header();
+            (
+                hdr.total_len() as u32,
+                hdr.protocol().0 as u32,
+                Ipv4Addr::from(hdr.source()).to_ipv6_mapped(),
+                Ipv4Addr::from(hdr.destination()).to_ipv6_mapped(),
+                hdr.dcp().value() as u32, // Differentiated Services Code Point
+            )
         }
-        0x86DD => {
-            // IPv6
-            if header.len() < ip_start + 40 {
-                return None; // Too short for IPv6 header
-            }
-
-            let ip_header = &header[ip_start..];
-            let payload_length = u16::from_be_bytes([ip_header[4], ip_header[5]]) as u32;
-            let next_header = ip_header[6] as u32; // Protocol
-            let traffic_class = ((ip_header[0] & 0x0F) << 4 | (ip_header[1] >> 4)) as u32;
-
-            let src_ip = Ipv6Addr::from([
-                ip_header[8],
-                ip_header[9],
-                ip_header[10],
-                ip_header[11],
-                ip_header[12],
-                ip_header[13],
-                ip_header[14],
-                ip_header[15],
-                ip_header[16],
-                ip_header[17],
-                ip_header[18],
-                ip_header[19],
-                ip_header[20],
-                ip_header[21],
-                ip_header[22],
-                ip_header[23],
-            ]);
-            let dst_ip = Ipv6Addr::from([
-                ip_header[24],
-                ip_header[25],
-                ip_header[26],
-                ip_header[27],
-                ip_header[28],
-                ip_header[29],
-                ip_header[30],
-                ip_header[31],
-                ip_header[32],
-                ip_header[33],
-                ip_header[34],
-                ip_header[35],
-                ip_header[36],
-                ip_header[37],
-                ip_header[38],
-                ip_header[39],
-            ]);
-
-            // Parse TCP/UDP ports if available
-            let (src_port, dst_port, tcp_flags) = if header.len() >= ip_start + 40 + 4 {
-                let transport_header = &header[ip_start + 40..];
-                let src = u16::from_be_bytes([transport_header[0], transport_header[1]]) as u32;
-                let dst = u16::from_be_bytes([transport_header[2], transport_header[3]]) as u32;
-
-                // Get TCP flags if it's TCP
-                let flags = if next_header == 6 && header.len() >= ip_start + 40 + 14 {
-                    transport_header[13] as u32
-                } else {
-                    0
-                };
-
-                (src, dst, flags)
-            } else {
-                (0, 0, 0)
-            };
-
-            Some((
-                40 + payload_length, // IPv6 header + payload
-                next_header,
-                src_ip,
-                dst_ip,
-                src_port,
-                dst_port,
-                tcp_flags,
-                traffic_class,
-            ))
+        Some(etherparse::NetSlice::Ipv6(ipv6)) => {
+            let hdr = ipv6.header();
+            // Use the payload length from the header since we can't easily get actual payload size
+            (
+                40 + hdr.payload_length() as u32, // IPv6 header is always 40 bytes
+                hdr.next_header().0 as u32,
+                Ipv6Addr::from(hdr.source()),
+                Ipv6Addr::from(hdr.destination()),
+                hdr.traffic_class() as u32,
+            )
         }
-        _ => None, // Unsupported EtherType
-    }
+        None => return None,
+    };
+
+    // Extract transport layer information (ports and TCP flags)
+    let (src_port, dst_port, tcp_flags) = match packet.transport {
+        Some(etherparse::TransportSlice::Tcp(tcp)) => {
+            let hdr = tcp.to_header();
+            (
+                hdr.source_port as u32,
+                hdr.destination_port as u32,
+                hdr.ns as u32
+                    | ((hdr.fin as u32) << 1)
+                    | ((hdr.syn as u32) << 2)
+                    | ((hdr.rst as u32) << 3)
+                    | ((hdr.psh as u32) << 4)
+                    | ((hdr.ack as u32) << 5)
+                    | ((hdr.urg as u32) << 6)
+                    | ((hdr.ece as u32) << 7)
+                    | ((hdr.cwr as u32) << 8),
+            )
+        }
+        Some(etherparse::TransportSlice::Udp(udp)) => {
+            let hdr = udp.to_header();
+            (
+                hdr.source_port as u32,
+                hdr.destination_port as u32,
+                0, // No flags for UDP
+            )
+        }
+        _ => (0, 0, 0), // No transport layer or unsupported protocol
+    };
+
+    Some((
+        length, protocol, src_ip, dst_ip, src_port, dst_port, tcp_flags, tos,
+    ))
 }
 
 pub fn serialize_sflow_record(
