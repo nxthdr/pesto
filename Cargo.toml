@@ -18,7 +18,7 @@ exclude = [
 anyhow = "1.0"
 bincode = "1.3"
 bytes = "1.9"
-capnp = "0.21"
+capnp = "0.23"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clap-verbosity-flag = { version = "3.0", features = ["tracing"] }
@@ -28,11 +28,10 @@ metrics-exporter-prometheus = "0.17"
 rdkafka = { version = "0.38", features = ["ssl", "sasl"] }
 serde = { version = "1.0", features = ["derive"] }
 sflow-parser = { version = "0.4.2", features = ["serde"] }
-
 tokio = { version = "1.42", features = ["full"] }
 tokio-graceful = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 [build-dependencies]
-capnpc = "0.21"
+capnpc = "0.23"
