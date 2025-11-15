@@ -1396,9 +1396,9 @@ dependencies = [
 
 [[package]]
 name = "sflow-parser"
-version = "0.4.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e48a8e1e6278df9a48a0c99abea05b5a68c6d1ead30f9e3b49e96010cbedf9"
+checksum = "a57e0db32629cc3dc6a7a524f321aec809e6cbc334d84ff525d6af07040c1d28"
 dependencies = [
  "serde",
 ]
