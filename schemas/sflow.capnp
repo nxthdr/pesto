@@ -1,6 +1,6 @@
 @0xb8c3d4e5f6a7b8c9;
 
-# Flat sFlow flow record - ClickHouse compatible (no unions)
+# Flat sFlow flow record - ClickHouse compatible
 # Following goflow2's approach: only flow samples, no counter samples
 struct SFlowFlowRecord {
   # Datagram metadata
