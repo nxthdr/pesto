@@ -137,6 +137,16 @@ pub fn serialize_sflow_record(
                 counter!("pesto_sflow_samples_received_total", "type" => "counter").increment(1);
                 trace!("Received counter sample (not serialized)");
             }
+            SampleData::RtMetric { .. } => {
+                // Route metric samples - not currently supported
+                counter!("pesto_sflow_samples_received_total", "type" => "rt_metric").increment(1);
+                trace!("Received RT metric sample (not serialized)");
+            }
+            SampleData::RtFlow { .. } => {
+                // Route flow samples - not currently supported
+                counter!("pesto_sflow_samples_received_total", "type" => "rt_flow").increment(1);
+                trace!("Received RT flow sample (not serialized)");
+            }
             SampleData::DiscardedPacket(_) => {
                 trace!("Skipping discarded packet sample");
             }
