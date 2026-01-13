@@ -54,6 +54,7 @@ fn parse_raw_packet_header(
                 hdr.traffic_class() as u32,
             )
         }
+        Some(etherparse::NetSlice::Arp(_)) => return None, // Skip ARP packets
         None => return None,
     };
 
