@@ -24,7 +24,7 @@ clap-verbosity-flag = { version = "3.0", features = ["tracing"] }
 etherparse = "0.19"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.18"
-rdkafka = { version = "0.38", features = ["ssl", "sasl"] }
+rdkafka = { version = "0.39", features = ["ssl", "sasl"] }
 sflow-parser = { version = "0.6.0", features = ["serde"] }
 tokio = { version = "1.42", features = ["full"] }
 tokio-graceful = "0.2"
